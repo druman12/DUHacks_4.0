@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "955268353153",
+    "project_id": "classroom-949b3",
+    "storage_bucket": "classroom-949b3.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:955268353153:android:4ccbef227699eb50899180",
+        "android_client_info": {
+          "package_name": "com.example.classroom"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAefpzsXowFCGP4UwJ0zF8x1wHP3_SDomQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:955268353153:android:deadfc5499deb07f899180",
+        "android_client_info": {
+          "package_name": "com.example.gametrick1"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAefpzsXowFCGP4UwJ0zF8x1wHP3_SDomQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
