@@ -1,313 +1,490 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:path_provider/path_provider.dart';
-import 'dart:io';
-import 'package:http/http.dart' as http;
-import 'package:classroom/UploadInfoPage.dart';
-import 'package:classroom/ClassInfo.dart';
-import 'pdf_viewer_page.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'UploadInfoPage.dart'; // Make sure this import matches your file structure
 
-class ClassDetailsPage extends StatelessWidget {
+class ClassDetailsPage extends StatefulWidget {
   final String classId;
   final DocumentSnapshot classData;
+  final String currentUserId;
 
   const ClassDetailsPage({
     Key? key,
     required this.classId,
-    required this.classData, required currentUserId,
+    required this.classData,
+    required this.currentUserId,
   }) : super(key: key);
 
-  Future<File> _downloadPDF(String pdfUrl) async {
-    final response = await http.get(Uri.parse(pdfUrl));
-    final directory = await getTemporaryDirectory();
-    final file = File('${directory.path}/${pdfUrl.split('/').last}');
-    await file.writeAsBytes(response.bodyBytes);
-    return file;
+  @override
+  State<ClassDetailsPage> createState() => _ClassDetailsPageState();
+}
+
+class _ClassDetailsPageState extends State<ClassDetailsPage> {
+  bool _showMembers = false;
+
+  // Navigation to Upload Info Page
+  void _goToUploadInfoPage(BuildContext context) async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => UploadInfoPage(classId: widget.classId),
+      ),
+    );
+
+    if (result == true) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Information uploaded successfully')),
+        );
+      }
+    }
   }
 
-  Future<void> _assignGrade(BuildContext context, String infoId) async {
-    final TextEditingController gradeController = TextEditingController();
-    showDialog(
+  // Delete Class Function
+  Future<void> _deleteClass(BuildContext context) async {
+    // Show confirmation dialog before deleting
+    final bool? confirm = await showDialog<bool>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Assign Grade'),
-          content: TextField(
-            controller: gradeController,
-            decoration: InputDecoration(labelText: 'Enter Grade'),
-            keyboardType: TextInputType.number,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Class'),
+        content: const Text('Are you sure you want to delete this class? This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('classes')
+          .doc(widget.classId)
+          .delete();
+
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Class deleted successfully')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to delete class: $e')),
+        );
+      }
+    }
+  }
+
+  // Remove Member Function
+  Future<void> _removeMember(String memberId) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('classes')
+          .doc(widget.classId)
+          .update({
+        'joinedUser': FieldValue.arrayRemove([memberId])
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Member removed successfully')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to remove member: $e')),
+        );
+      }
+    }
+  }
+
+  // Show Remove Member Confirmation Dialog
+  Future<void> _showRemoveConfirmation(BuildContext context, String userId, String username) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remove Member'),
+        content: Text('Are you sure you want to remove $username from the class?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Remove'),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _removeMember(userId);
+    }
+  }
+
+  // Build Members List Widget
+  Widget _buildMembersList() {
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('classes')
+          .doc(widget.classId)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Center(
+            child: Text('Error: ${snapshot.error}'),
+          );
+        }
+
+        if (!snapshot.hasData) {
+          return const Center(
+            child: CircularProgressIndicator(),
+          );
+        }
+        final classData = snapshot.data!.data() as Map<String, dynamic>;
+        final String classCreatorId = classData['userId'];
+
+        // Changed from 'members' to 'joinedUser'
+        final List<String> joinedUsers = List<String>.from(classData['joinedUser'] ?? []);
+
+        if (widget.currentUserId != classCreatorId) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(16.0),
+              child: Text(
+                'Members list is only visible to the class creator.',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: Colors.blueGrey,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
             ),
-            TextButton(
-              onPressed: () async {
-                final grade = gradeController.text;
-                if (grade.isNotEmpty) {
-                  await _updateGrade(infoId, grade);
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Grade assigned successfully')),
-                  );
-                }
-              },
-              child: const Text('Assign'),
+          );
+        }
+
+        if (joinedUsers.isEmpty) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(16.0),
+              child: Text(
+                'No members in this class.',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: Colors.blueGrey,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
             ),
-          ],
+          );
+        }
+
+        return FutureBuilder<QuerySnapshot>(
+          future: FirebaseFirestore.instance
+              .collection('users')
+              .where(FieldPath.documentId, whereIn: joinedUsers)
+              .get(),
+          builder: (context, userSnapshot) {
+            if (userSnapshot.hasError) {
+              return Center(
+                child: Text('Error loading members: ${userSnapshot.error}'),
+              );
+            }
+
+            if (!userSnapshot.hasData) {
+              return const Center(
+                child: CircularProgressIndicator(),
+              );
+            }
+
+            final users = userSnapshot.data!.docs;
+
+            return Container(
+              margin: const EdgeInsets.only(top: 10),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.blueGrey[50],
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Class Members',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blueGrey,
+                        ),
+                      ),
+                      Text(
+                        '${users.length} members',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.blueGrey[600],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  ListView.separated(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: users.length,
+                    separatorBuilder: (context, index) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final userData = users[index].data() as Map<String, dynamic>;
+                      final userId = users[index].id;
+                      // Make sure to use the correct field name for username in your users collection
+                      final username = userData['username'] ?? 'Unknown User';
+
+                      return ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: Colors.blueGrey[200],
+                          child: Text(
+                            '${index + 1}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        title: Text(
+                          username,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        trailing: widget.classData['userId'] == widget.currentUserId
+                            ? IconButton(
+                          icon: const Icon(
+                            Icons.remove_circle_outline,
+                            color: Colors.red,
+                          ),
+                          onPressed: () => _showRemoveConfirmation(
+                            context,
+                            userId,
+                            username,
+                          ),
+                        )
+                            : null,
+                      );
+                    },
+                  ),
+                ],
+              ),
+            );
+          },
         );
       },
     );
   }
 
-  Future<void> _updateGrade(String infoId, String grade) async {
-    try {
-      await FirebaseFirestore.instance
-          .collection('classes')
-          .doc(classId)
-          .collection('info')
-          .doc(infoId)
-          .update({'grade': grade});
-    } catch (e) {
-      print('Failed to update grade: $e');
-    }
-  }
-
-  void _openPDF(BuildContext context, String pdfUrl) async {
-    try {
-      final file = await _downloadPDF(pdfUrl);
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => PDFViewerPage(filePath: file.path),
-        ),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to open PDF: $e')),
-      );
-    }
-  }
-
-  Future<void> _deleteInfo(BuildContext context, String infoId) async {
-    try {
-      await FirebaseFirestore.instance
-          .collection('classes')
-          .doc(classId)
-          .collection('info')
-          .doc(infoId)
-          .delete();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Information deleted successfully')),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to delete information: $e')),
-      );
-    }
-  }
-
-  Future<void> _deleteClass(BuildContext context) async {
-    try {
-      await FirebaseFirestore.instance.collection('classes').doc(classId).delete();
-      Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Class deleted successfully')),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to delete class: $e')),
-      );
-    }
-  }
-
-  Future<String> _getCurrentUserRole() async {
-    try {
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(FirebaseAuth.instance.currentUser!.uid)
-          .get();
-      return userDoc['role'] as String;
-    } catch (e) {
-      print('Error fetching user role: $e');
-      return 'guest'; // Default or error role
-    }
-  }
-
-  void _goToUploadInfoPage(BuildContext context) async {
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => UploadInfoPage(classId: classId)),
-    );
-
-    if (result == true) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Information uploaded successfully')),
-      );
-    }
-  }
-
-  void _goToClassInfoPage(BuildContext context, DocumentSnapshot infoData) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ClassInfoPage(infoData: infoData, userId: classData['userId']),
-      ),
-    );
-  }
-
+  // Build Main UI
   @override
   Widget build(BuildContext context) {
-    final currentUserId = FirebaseAuth.instance.currentUser!.uid;
-    final classCreatorId = classData['userId'];
+    final classCreatorId = widget.classData['userId'];
+    final classData = widget.classData.data() as Map<String, dynamic>;
+
     return Scaffold(
       appBar: AppBar(
         title: Text(classData['className']),
         backgroundColor: Colors.blueGrey[600],
         actions: [
-          if (currentUserId == classCreatorId) ...[
+          if (widget.currentUserId == classCreatorId) ...[
             IconButton(
               icon: const Icon(Icons.add),
+              tooltip: 'Upload Information',
               onPressed: () => _goToUploadInfoPage(context),
             ),
             IconButton(
               icon: const Icon(Icons.delete_forever),
+              tooltip: 'Delete Class',
               onPressed: () => _deleteClass(context),
             ),
           ]
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Class Name: ${classData['className']}',
-              style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: Colors.blueGrey),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Subject: ${classData['subject']}',
-              style: const TextStyle(fontSize: 20, color: Colors.blueGrey),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Class Code: ${classData['classCode']}',
-              style: const TextStyle(fontSize: 20, color: Colors.blueGrey),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Uploaded Information:',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: StreamBuilder<QuerySnapshot>(
+      body: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Class Details Section
+              Card(
+                elevation: 2,
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Class Name: ${classData['className']}',
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blueGrey,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Subject: ${classData['subject']}',
+                        style: TextStyle(
+                          fontSize: 18,
+                          color: Colors.blueGrey[600],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Class Code: ${classData['classCode']}',
+                        style: TextStyle(
+                          fontSize: 18,
+                          color: Colors.blueGrey[600],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // Members Section
+              // ElevatedButton.icon(
+              //   onPressed: () {
+              //     setState(() {
+              //       _showMembers = !_showMembers;
+              //     });
+              //   },
+              //   icon: Icon(_showMembers ? Icons.visibility_off : Icons.visibility),
+              //   label: Text(_showMembers ? 'Hide Members' : 'Show Members'),
+              //   style: ElevatedButton.styleFrom(
+              //     backgroundColor: Colors.blueGrey[300],
+              //     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              //     shape: RoundedRectangleBorder(
+              //       borderRadius: BorderRadius.circular(8),
+              //     ),
+              //   ),
+              // ),
+              if (widget.currentUserId == widget.classData['userId'])
+                ElevatedButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _showMembers = !_showMembers;
+                    });
+                  },
+                  icon: Icon(_showMembers ? Icons.visibility_off : Icons.visibility),
+                  label: Text(_showMembers ? 'Hide Members' : 'Show Members'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blueGrey[300],
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+
+              if (_showMembers) _buildMembersList(),
+
+              const SizedBox(height: 24),
+
+              // Uploaded Information Section
+              const Text(
+                'Uploaded Information',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.blueGrey,
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Information List
+              StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
                     .collection('classes')
-                    .doc(classId)
+                    .doc(widget.classId)
                     .collection('info')
                     .orderBy('createdAt', descending: true)
                     .snapshots(),
                 builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return Center(
+                      child: Text('Error: ${snapshot.error}'),
+                    );
+                  }
+
                   if (!snapshot.hasData) {
-                    return const Center(child: CircularProgressIndicator());
+                    return const Center(
+                      child: CircularProgressIndicator(),
+                    );
                   }
 
                   final infoDocs = snapshot.data!.docs;
 
                   if (infoDocs.isEmpty) {
-                    return const Center(child: Text('No information uploaded yet.'));
+                    return const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(16.0),
+                        child: Text(
+                          'No information uploaded yet.',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: Colors.blueGrey,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ),
+                    );
                   }
 
                   return ListView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
                     itemCount: infoDocs.length,
                     itemBuilder: (context, index) {
                       final info = infoDocs[index];
-                      final Map<String, dynamic>? data = info.data() as Map<String, dynamic>?;
+                      final data = info.data() as Map<String, dynamic>;
 
-                      final pdfUrl = data != null && data.containsKey('pdfUrl') ? data['pdfUrl'] as String? : null;
-                      final submittedPdf = data != null && data.containsKey('submittedPdf') ? data['submittedPdf'] as String? : null;
-                      final infoId = info.id;
-
+                      // Add your information display widget here
                       return Card(
-                        margin: const EdgeInsets.symmetric(vertical: 10),
-                        color: Colors.blueGrey[50],
-                        elevation: 4,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12.0),
-                        ),
-                        child: InkWell(
-                          onTap: () => _goToClassInfoPage(context, info),
-                          child: Padding(
-                            padding: const EdgeInsets.all(16.0),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  info['title'],
-                                  style: const TextStyle(
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.blueGrey,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  info['description'],
-                                  style: const TextStyle(fontSize: 16, color: Colors.blueGrey),
-                                ),
-                                const SizedBox(height: 12),
-                                if (pdfUrl != null && pdfUrl.isNotEmpty)
-                                  ElevatedButton.icon(
-                                    onPressed: () => _openPDF(context, pdfUrl),
-                                    icon: const Icon(Icons.picture_as_pdf),
-                                    label: const Text('Open PDF'),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.blueGrey[200],
-                                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                                    ),
-                                  ),
-                                if (submittedPdf != null && submittedPdf.isNotEmpty)
-                                  ElevatedButton.icon(
-                                    onPressed: () => _openPDF(context, submittedPdf),
-                                    icon: const Icon(Icons.picture_as_pdf),
-                                    label: const Text('View Submitted PDF'),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.blueGrey[200],
-                                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                                    ),
-                                  ),
-                                const SizedBox(height: 12),
-                                if (currentUserId == classCreatorId)
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      ElevatedButton(
-                                        onPressed: () => _assignGrade(context, infoId),
-                                        child: const Text('Assign Grade'),
-                                      ),
-                                      IconButton(
-                                        icon: const Icon(Icons.delete),
-                                        onPressed: () => _deleteInfo(context, infoId),
-                                        color: Colors.red,
-                                      ),
-                                    ],
-                                  ),
-                              ],
-                            ),
-                          ),
+                        margin: const EdgeInsets.only(bottom: 8),
+                        child: ListTile(
+                          title: Text(data['title'] ?? 'No Title'),
+                          subtitle: Text(data['description'] ?? 'No Description'),
+                          // Add more fields as needed
                         ),
                       );
                     },
                   );
                 },
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

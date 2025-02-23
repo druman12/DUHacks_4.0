@@ -3,142 +3,89 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class JoinClassroomPage extends StatefulWidget {
-  const JoinClassroomPage({super.key});
-
   @override
   _JoinClassroomPageState createState() => _JoinClassroomPageState();
 }
 
 class _JoinClassroomPageState extends State<JoinClassroomPage> {
   final TextEditingController _classCodeController = TextEditingController();
+  final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  void _joinClass() async {
-    final String classCode = _classCodeController.text.trim();
-    final String userId = FirebaseAuth.instance.currentUser!.uid;
+  Future<void> _joinClassroom() async {
+    String classCode = _classCodeController.text.trim();
+    String userId = _auth.currentUser?.uid ?? "";
 
-    if (classCode.isEmpty) {
+    if (classCode.isEmpty || userId.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a class code')),
+        const SnackBar(content: Text("Please enter a valid class code")),
       );
       return;
     }
 
     try {
-      final classQuery = await FirebaseFirestore.instance
-          .collection('classes')
-          .where('classCode', isEqualTo: classCode)
+      QuerySnapshot classQuery = await FirebaseFirestore.instance
+          .collection("classes")
+          .where("classCode", isEqualTo: classCode)
           .limit(1)
           .get();
 
-      if (classQuery.docs.isEmpty) {
+      if (classQuery.docs.isNotEmpty) {
+        DocumentSnapshot classSnapshot = classQuery.docs.first;
+        String classId = classSnapshot.id; // Get the actual document ID
+        List<dynamic> joinedUsers = classSnapshot["joinedUser"] ?? [];
+
+        if (joinedUsers.contains(userId)) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("You have already joined this class")),
+          );
+          return;
+        }
+
+        // Add user to class
+        await FirebaseFirestore.instance.collection("classes").doc(classId).update({
+          "joinedUser": FieldValue.arrayUnion([userId]),
+        });
+
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Class not found')),
+          const SnackBar(content: Text("Successfully joined the classroom!")),
         );
-        return;
-      }
 
-      final classDoc = classQuery.docs.first;
-      final classRef = classDoc.reference;
-
-      if (classDoc['userId'] == userId) {
+        Navigator.pop(context);
+      } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('You cannot join your own class')),
+          const SnackBar(content: Text("Classroom not found. Please check the code.")),
         );
-        return;
       }
-
-      await classRef.update({
-        'joinedUser': FieldValue.arrayUnion([userId]),
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Joined the class successfully')),
-      );
-      Navigator.pop(context);
     } catch (e) {
-      print('Error joining class: $e');
+      print("Error joining class: $e");
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to join class: $e')),
+        SnackBar(content: Text("Error joining class: $e")),
       );
     }
   }
 
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Join Classroom'),
-        backgroundColor: Colors.blueGrey[500],
-        elevation: 0,
-      ),
-      body: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(20.0),
-        color: Colors.grey[100], // Simple background color
-        child: Center(
-          child: SingleChildScrollView(
-            child: Card(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(15.0),
-              ),
-              elevation: 8,
-              child: Padding(
-                padding: const EdgeInsets.all(20.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const Text(
-                      'Enter Class Code',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 20),
-                    TextField(
-                      controller: _classCodeController,
-                      decoration: InputDecoration(
-                        labelText: 'Class Code',
-                        labelStyle: const TextStyle(color: Colors.deepPurple),
-                        filled: true,
-                        fillColor: Colors.white,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(15.0),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderSide: const BorderSide(
-                            color: Colors.deepPurpleAccent,
-                            width: 2.0,
-                          ),
-                          borderRadius: BorderRadius.circular(15.0),
-                        ),
-                      ),
-                      style: const TextStyle(fontSize: 18),
-                    ),
-                    const SizedBox(height: 30),
-                    ElevatedButton.icon(
-                      onPressed: _joinClass,
-                      icon: const Icon(Icons.class_),
-                      label: const Text('Join Class'),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 15.0,
-                          horizontal: 20.0,
-                        ),
-                        textStyle: const TextStyle(fontSize: 20),
-                        backgroundColor: Colors.blueGrey[200],
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(15.0),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+      appBar: AppBar(title: const Text("Join Classroom")),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            TextField(
+              controller: _classCodeController,
+              decoration: const InputDecoration(
+                labelText: "Enter Class Code",
+                border: OutlineInputBorder(),
               ),
             ),
-          ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _joinClassroom,
+              child: const Text("Join Class"),
+            ),
+          ],
         ),
       ),
     );

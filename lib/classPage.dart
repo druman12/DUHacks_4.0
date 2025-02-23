@@ -43,7 +43,7 @@ class _UserClassesPageState extends State<UserClassesPage> with SingleTickerProv
   void _navigateToJoinClassPage() {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => const JoinClassroomPage()),
+      MaterialPageRoute(builder: (context) => JoinClassroomPage()),
     );
   }
 
