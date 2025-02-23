@@ -75,47 +75,6 @@ class _ClassDetailsPageState extends State<ClassDetailsPage> {
     }
   }
 
-  Future<void> _removeMember(String memberId) async {
-    try {
-      await FirebaseFirestore.instance.collection('classes').doc(widget.classId).update({
-        'joinedUser': FieldValue.arrayRemove([memberId])
-      });
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Member removed successfully')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to remove member: $e')),
-        );
-      }
-    }
-  }
-
-  Future<void> _showRemoveConfirmation(BuildContext context, String userId) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Remove Member'),
-        content: const Text('Are you sure you want to remove this user from the class?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Remove'),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-          ),
-        ],
-      ),
-    );
-    if (confirmed == true) {
-      await _removeMember(userId);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final classCreatorId = widget.classData['userId'];
@@ -220,12 +179,6 @@ class _ClassDetailsPageState extends State<ClassDetailsPage> {
                 return ListTile(
                   title: Text(user['username'] ?? 'Unknown User'),
                   subtitle: Text(user['email'] ?? ''),
-                  trailing: widget.currentUserId == classData['userId']
-                      ? IconButton(
-                    icon: const Icon(Icons.remove_circle, color: Colors.red),
-                    onPressed: () => _showRemoveConfirmation(context, user['id']!),
-                  )
-                      : null,
                 );
               },
             );
